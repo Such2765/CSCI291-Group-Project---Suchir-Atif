@@ -1,0 +1,135 @@
+// Linking Libraries
+#include <webots/robot.h>
+#include <webots/motor.h>
+#include <webots/distance_sensor.h>
+#include <webots/light_sensor.h>
+#include <webots/led.h>
+#include <stdio.h>
+#include <stdbool.h>
+
+// Global Variables
+#define TIME_STEP 64
+#define MAX_SPEED 6.28
+
+int main(int argc, char **argv) {
+   // Initialize the Webots API
+   wb_robot_init();
+
+   // Initialize motors
+   WbDeviceTag left_motor = wb_robot_get_device("left wheel motor");
+   WbDeviceTag right_motor = wb_robot_get_device("right wheel motor");
+
+   // Initialize the light sensor
+   WbDeviceTag light_sensor = wb_robot_get_device("ls0");
+   wb_light_sensor_enable(light_sensor, TIME_STEP);
+
+   // Initialize the LED 
+   WbDeviceTag led = wb_robot_get_device("led1");  
+
+   // Initialize the distance sensor 
+   WbDeviceTag distance_sensor = wb_robot_get_device("ps0");
+   wb_distance_sensor_enable(distance_sensor, TIME_STEP);
+
+   if (left_motor == 0 || right_motor == 0) {
+       printf("Error: Motors not found.\n");
+       return -1;
+   }
+
+      // Set the motors to infinite position for continuous rotation
+   wb_motor_set_position(left_motor, INFINITY);
+   wb_motor_set_position(right_motor, INFINITY);
+
+   // Initialize proximity sensors
+   WbDeviceTag prox_sensors[8];
+   char prox_sensor_name[50];
+
+   for (int ind = 0; ind < 8; ++ind) {
+       sprintf(prox_sensor_name, "ps%d", ind);
+       prox_sensors[ind] = wb_robot_get_device(prox_sensor_name);
+       wb_distance_sensor_enable(prox_sensors[ind], TIME_STEP);
+   }
+
+   double max_light_intensity = 0.0;
+   int max_light_step = 0;
+
+   // Main loop
+   for (int step = 0; wb_robot_step(TIME_STEP) != -1; step++) {
+       // Read distance sensor values
+       double ps5_val = wb_distance_sensor_get_value(prox_sensors[5]);
+       double ps6_val = wb_distance_sensor_get_value(prox_sensors[6]);
+       double ps7_val = wb_distance_sensor_get_value(prox_sensors[7]);
+
+       // Read the light sensor value
+       double light_value = wb_light_sensor_get_value(light_sensor);
+
+       // Sensor thresholds for detecting obstacles
+       bool left_wall = ps5_val > 80;
+       bool left_corner = ps6_val > 80;
+       bool front_wall = ps7_val > 80;
+
+       // Default speeds
+       double left_speed = MAX_SPEED;
+       double right_speed = MAX_SPEED;
+
+       // Process sensor data and adjust movement
+       if (front_wall) {
+           left_speed = MAX_SPEED;
+           right_speed = -MAX_SPEED;
+       } else if (left_wall) {
+           left_speed = MAX_SPEED;
+           right_speed = MAX_SPEED;
+       } else if (left_corner) {
+           left_speed = MAX_SPEED;
+           right_speed = MAX_SPEED / 8;
+       } else {
+           left_speed = MAX_SPEED / 8;
+           right_speed = MAX_SPEED;
+       }
+
+       // Maximum light intensity and step
+       if (light_value > max_light_intensity) {
+           max_light_intensity = light_value;
+           max_light_step = step;
+       }
+
+       // Set motor velocities
+       wb_motor_set_velocity(left_motor, left_speed);
+       wb_motor_set_velocity(right_motor, right_speed);
+
+       // Simulation end condition 
+       if (step > 5000) { 
+           printf("End of maze reached. Returning to highest light intensity.\n");
+           break;
+       }
+   }
+
+   printf("Overall Max Light Intensity: %f at step %d\n", max_light_intensity, max_light_step);
+
+   // Logic to return to the highest light intensity
+   for (int step = 0; step < max_light_step / 2; step++) {
+       wb_motor_set_velocity(left_motor, -MAX_SPEED);
+       wb_motor_set_velocity(right_motor, -MAX_SPEED);
+       wb_robot_step(TIME_STEP);
+
+       // Immediately stop after completing the return steps
+       if (step == max_light_step / 2 - 1) {
+           wb_motor_set_velocity(left_motor, 0);
+           wb_motor_set_velocity(right_motor, 0);
+           break; 
+       }
+   }
+
+   printf("Returned to the location of maximum light intensity. Robot stopped immediately.\n");
+
+   // Turns on the LED when the robot reaches the highest light intensity point
+   wb_led_set(led, 1);  // 1 turns the LED on
+
+   // Adds a time delay of 3.5 seconds, once the robot reaches the highest light intensity point
+   int delay_duration = 3500;  // Delay in milliseconds
+   int elapsed_time = 0;
+
+   // Cleanup Webots resources
+   wb_robot_cleanup();
+
+   return 0;
+}
